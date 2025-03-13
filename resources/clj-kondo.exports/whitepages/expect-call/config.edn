@@ -1,4 +1,5 @@
-{:hooks
+{:min-clj-kondo-version "2025.02.20"
+ :hooks
  {:analyze-call
   {whitepages.expect-call/with-expect-call hooks.whitepages.expect-call/expect-call
    whitepages.expect-call/expect-call hooks.whitepages.expect-call/expect-call}}

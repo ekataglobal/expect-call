@@ -5,6 +5,12 @@
   :hooks {:deps
           {clj-kondo/clj-kondo
            {:git/url "https://github.com/clj-kondo/clj-kondo.git"
-            :git/tag "v2025.01.16"
-            :git/sha "3994c84"}}
-          :paths ["resources/clj-kondo.exports/whitepages/expect-call"]}}}
+            :git/tag "v2025.02.20"
+            :git/sha "2f91d3d"}}
+          :paths ["resources/clj-kondo.exports/whitepages/expect-call"]}
+  :lint {:deps
+         {clj-kondo/clj-kondo
+          {:git/url "https://github.com/clj-kondo/clj-kondo.git"
+           :git/tag "v2025.02.20"
+           :git/sha "2f91d3d"}}
+         :main-opts ["-m" "clj-kondo.main" "--parallel" "--lint"]}}}
