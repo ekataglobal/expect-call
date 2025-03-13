@@ -6,9 +6,32 @@ A fork of: https://github.com/meredydd/expect-call
 
 ## Development on this fork
 
+### Running tests
+
+Run tests with `lein test`.
+
+To check compatibility with different versions of Clojure, use the [Leiningen profiles](https://github.com/technomancy/leiningen/blob/master/doc/PROFILES.md#merging:~:text=Another%20use%20of%20profiles%20is%20to%20test%20against%20various%20sets%20of%20dependencies) defined:
+
+```shell
+lein with-profile 1.7 test
+lein with-profile 1.11 test
+
+etc.
+```
+
+Or even:
+
+```shell
+#!/usr/bin/env fish
+
+lein test && for i in (seq 6 12)
+    lein with-profile 1.$i test
+end
+```
+
 ### Bumping dependencies
 
-Update both `deps.edn` and `project.clj` for now.
+Update both `deps.edn` and `project.clj`.
 
 ### Linting
 
@@ -24,16 +47,10 @@ clj-kondo --lint src:test:deps.edn:.clj-kondo/config.edn:resources
 
 Use the `:hooks` alias in your editor/to start your repl. Optional: bump clj-kondo version there.
 
-### Running tests
-
-Use `lein test`. For example:
+Can use the `lint` alias to use a specific clj-kondo version:
 
 ```shell
-#!/usr/bin/env fish
-
-lein test && for i in (seq 6 12)
-    lein with-profile 1.$i test
-end
+clojure -M:lint src:test:deps.edn:.clj-kondo/config.edn:resources
 ```
 
 ## Introduction
@@ -284,7 +301,6 @@ Now, wasn't that so much nicer than dependency injection?
 ## Feedback
 
 Please send feedback and pull requests to `meredydd@senatehouse.org`, or `meredydd` on GitHub.
-
 
 ## License
 
