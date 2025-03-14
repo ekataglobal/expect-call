@@ -204,7 +204,7 @@
 
   (testing "Not called"
     (check-line
-     (sut/with-expect-call (log))))
+     (sut/with-expect-call (log) (inc 1))))
 
   (testing "Wrong function"
     (check-line (sut/with-expect-call [(log) (println)] (println "hi"))))

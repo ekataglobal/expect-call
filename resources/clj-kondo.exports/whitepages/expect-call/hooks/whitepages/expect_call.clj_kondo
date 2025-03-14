@@ -121,20 +121,17 @@
     (:children expected-fns-node)
     [expected-fns-node]))
 
-(defn with-ignore-unresolved  [node]
-  (vary-meta node assoc :clj-kondo/ignore [:unresolved-symbol :unresolved-var]))
-
 (letfn
  [(analyze-rf
     ([] {:args-node [] :symbol-nodes [] :value-nodes []})
     ([acc] (update acc :args-node api/vector-node))
     ([acc arg-node]
      (cond
-       (symbol-node? arg-node)
+       (and (symbol-node? arg-node) (simple-symbol? (api/sexpr arg-node)))
        (merge-with
         conj acc
         {:args-node arg-node
-         :symbol-nodes (-> arg-node with-ignore-unresolved)})
+         :symbol-nodes arg-node})
 
        (api/vector-node? arg-node)
        (merge-with
@@ -167,39 +164,51 @@
     [args-node]
     (analyze-argvec- args-node)))
 
-(defn redefed-fn
-  "Transforms expected fn spec into a pair usable with with-redefs.
-  As it might replace nodes in the argvec, it tries to add statements (prn)
-  that result in registering usage and further analysis for the replaced nodes"
-  [{:keys [children]}]
-  (let [[fn-name-node args-node & body] (into [] (drop-while api/keyword-node?) children)
-        {:keys [args-node #_symbol-nodes value-nodes]} (analyze-argvec args-node)]
-    [fn-name-node
-     (api/list-node
-      (->
-       [(api/token-node 'do)]
-       (cond->
-        ;; register usage of symbols that are both in the argvec and are valid just outside
-        ;; check after https://github.com/clj-kondo/clj-kondo/issues/2472
-        #_#_(seq symbol-nodes)
-        (conj (-> (api/list-node (list* (api/token-node `prn) symbol-nodes)) with-ignore-unresolved))
+(let [drop-while-keyword-xf
+      (drop-while api/keyword-node?)
 
-        ;; register use of replaced value nodes so they can be linted too
-        (seq value-nodes)
-        (conj (api/list-node (list* (api/token-node `prn) value-nodes))))
+      ->resolved-symbols-xf
+      (comp (map api/sexpr)
+            (filter #(or (api/resolve {:name %})
+                         (contains? (api/env) %))))
 
-       ;; actual fn definition to have body linted
-       (conj (api/list-node (list* (api/token-node 'fn) args-node body)))))]))
+      ->fake-use-node
+      (fn [nodes]
+        (api/list-node (list* (api/token-node `prn) nodes)))]
+  (defn redefed-fn
+    "Transforms expected fn spec into a pair usable with with-redefs.
+    As it might replace nodes in the argvec, it tries to add fake statements (prn)
+    that result in registering usage and further analysis for the replaced nodes"
+    [{:keys [children]}]
+    (let [[fn-name-node args-node & body] (into [] drop-while-keyword-xf children)
+          {:keys [args-node symbol-nodes value-nodes]} (analyze-argvec args-node)
+          resolved-symbols (into [] ->resolved-symbols-xf symbol-nodes)
+          register-use-inside (mapv api/token-node resolved-symbols)
+          register-use-outside (into register-use-inside value-nodes)]
+      [fn-name-node
+       (-> [(api/token-node 'fn) args-node] ;; (fn [...]
+           (cond->
+            ;; register usage of symbols that are both in the argvec and are valid just outside
+            (seq register-use-inside)
+            (conj (->fake-use-node register-use-inside))) ;; (prn a b c)
+           (conj body) ;; original fn body
+           (as-> $ (api/list-node (apply list* $))) ;; make it a list node
+           (cond->
+            ;; register usage of symbols that are both in the argvec and are valid just outside, or got replaced
+            (seq register-use-outside)
+            ;; wrap with (do (prn a b c) (fn...))
+            (as-> $ (api/list-node [(api/token-node 'do) (->fake-use-node register-use-outside) $]))))])))
 
-(defn ->with-redefs [expect-call-node]
-  (let [[expectations-node & body] (rest (:children expect-call-node))]
-    (-> expectations-node
-        (->expected-fn-nodes)
-        (->> (into [] (mapcat redefed-fn)))
-        (api/vector-node)
-        (as-> $ (list* (api/token-node 'with-redefs) $ body))
-        (api/list-node)
-        #_(doto (-> api/sexpr prn)))))
+(let [mapcat-redefed-fn-xf (mapcat redefed-fn)]
+  (defn ->with-redefs [expect-call-node]
+    (let [[expectations-node & body] (rest (:children expect-call-node))]
+      (-> expectations-node
+          (->expected-fn-nodes)
+          (->> (into [] mapcat-redefed-fn-xf))
+          (api/vector-node)
+          (as-> $ (list* (api/token-node 'with-redefs) $ body))
+          (api/list-node)
+          #_(doto (-> api/sexpr prn))))))
 
 ;; endregion transformation
 
