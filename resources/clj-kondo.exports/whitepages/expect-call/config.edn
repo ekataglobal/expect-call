@@ -11,6 +11,7 @@
   :expect-call/duplicate-tag {:level :warning}
   :expect-call/unknown-tag {:level :warning}
   :expect-call/never-with-other-tags {:level :error}
+  :expect-call/any-order-with-more {:level :error}
   :expect-call/no-fn-name {:level :error}
   :expect-call/fn-name {:level :error}
   :expect-call/never-with-args {:level :error}

@@ -4,6 +4,8 @@ A Clojure library that makes it simple to mock out functions for testing.
 
 A fork of: https://github.com/meredydd/expect-call
 
+Requires Clojure 1.9 at least.
+
 ## Development on this fork
 
 ### Running tests
@@ -13,8 +15,8 @@ Run tests with `lein test`.
 To check compatibility with different versions of Clojure, use the [Leiningen profiles](https://github.com/technomancy/leiningen/blob/master/doc/PROFILES.md#merging:~:text=Another%20use%20of%20profiles%20is%20to%20test%20against%20various%20sets%20of%20dependencies) defined:
 
 ```shell
-lein with-profile 1.7 test
-lein with-profile 1.11 test
+lein with-profile 1.9 test
+lein with-profile 1.12 test
 
 etc.
 ```
@@ -24,7 +26,7 @@ Or even:
 ```shell
 #!/usr/bin/env fish
 
-lein test && for i in (seq 6 12)
+lein test && for i in (seq 9 12)
     lein with-profile 1.$i test
 end
 ```
@@ -218,6 +220,23 @@ Note that you can't specify a pattern or test behaviour with `:never`. If a `:ne
     (check-error :error "abc")
     (check-error :error "xyz")))
 ```
+
+
+### `:any-order`
+
+Code that runs things concurrently (parallel futures, `core.async` `go` blocks, etc.) calls functions in no fixed order. `(:any-order fn-name args & body)` expects exactly one matching call, at any point during the test, regardless of the order of the other expectations:
+
+```clojure
+(deftest fetch-all
+  (expect-call [(:any-order fetch! [:users] [{:id 1}])
+                (:any-order fetch! [:orders] [])]
+    (is (= {:users [{:id 1}] :orders []}
+           (fetch-all-concurrently)))))
+```
+
+Each `:any-order` expectation matches at most one call: the first call whose arguments match its pattern. The test fails if one of them is never matched, or if a call matches none of them. Unlike `:more`, several `:any-order` expectations can be given for the same function; the arguments decide which one a call is matched to.
+
+If the next ordered expectation is for the same function, a call is matched to that one, not to an `:any-order` one. `:any-order` can be combined with `:do`, but not with `:more` or `:never`.
 
 
 ### `:do`

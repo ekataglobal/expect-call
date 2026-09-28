@@ -3,17 +3,18 @@
 
 ;; region validation
 
-(def known-tags #{:do :more :never})
+(def known-tags #{:do :more :never :any-order})
 
 (def findings
   {:expect-call/expectations-missing
-   "Needs expected-fn(s): (fn arg-match body...) or [(fn arg-match body...)...], each fn may be preceded by keywords :do, :more, or :never."
+   "Needs expected-fn(s): (fn arg-match body...) or [(fn arg-match body...)...], each fn may be preceded by keywords :do, :more, :any-order or :never."
    :expect-call/empty-body "Empty expect-call body"
    :expect-call/empty-expectations "No expected calls"
-   :expect-call/fspec "Must be (fn-name arg-match body...), fn-name may be preceded by keywords :do, :more, or :never."
+   :expect-call/fspec "Must be (fn-name arg-match body...), fn-name may be preceded by keywords :do, :more, :any-order or :never."
    :expect-call/duplicate-tag "Duplicate tag"
    :expect-call/unknown-tag "Unknown tag"
    :expect-call/never-with-other-tags "No tags should be used together with :never"
+   :expect-call/any-order-with-more ":any-order and :more can't be used together"
    :expect-call/no-fn-name "Must be followed by a symbol representing a fn name"
    :expect-call/fn-name "Must be a symbol representing a fn name"
    :expect-call/never-with-args "No args or body should be used with :never"
@@ -47,6 +48,9 @@
     (do (when (or (contains? seen-tags :never)
                   (and (= :never k) (seq seen-tags)))
           (reg-finding! node :expect-call/never-with-other-tags))
+        (when (or (and (= :any-order k) (contains? seen-tags :more))
+                  (and (= :more k) (contains? seen-tags :any-order)))
+          (reg-finding! node :expect-call/any-order-with-more))
         k)))
 
 (defn valid-tags+rest!

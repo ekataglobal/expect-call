@@ -19,9 +19,21 @@
          :stack-trace (seq stack-trace)})
       msg))))
 
+(defn- take-any-order!
+  "Removes and returns the first :any-order expectation for `real-fn` whose
+   pattern matches `args`, or nil."
+  [any-order real-fn args]
+  (let [matches? (fn [[ex-real-fn _ _ _ ex-matches?]]
+                   (and (= real-fn ex-real-fn) (apply ex-matches? args)))
+        [old]    (swap-vals! any-order
+                             (fn [expectations]
+                               (let [[before [_ & after]] (split-with (complement matches?) expectations)]
+                                 (concat before after))))]
+    (first (filter matches? old))))
+
 (defn -expected-call
   "Used by (expect-call) macro. You don't call this."
-  [[more-fns calls :as _state] real-fn real-fn-name args]
+  [[more-fns calls any-order :as _state] real-fn real-fn-name args]
   (if *disable-interception*
     (apply real-fn args)
 
@@ -32,17 +44,19 @@
           (apply ex-fn args))
 
         ;; It didn't match an explicit expectation - did it match
-        ;; a :more or :never?
-        (if-let [more-fn (more-fns real-fn)]
-          (apply more-fn args)
+        ;; an :any-order, a :more or a :never?
+        (if-let [[_ any-order-fn] (take-any-order! any-order real-fn args)]
+          (apply any-order-fn args)
+          (if-let [more-fn (more-fns real-fn)]
+            (apply more-fn args)
 
-          ;; Nope - it's just wrong
-          (my-report {:type :fail
-                      :message (if ex-real-fn
-                                 "Wrong function called"
-                                 (str "Too many calls to " real-fn-name))
-                      :expected (cons ex-real-fn-name ex-args)
-                      :actual (cons real-fn-name args)}))))))
+            ;; Nope - it's just wrong
+            (my-report {:type :fail
+                        :message (if ex-real-fn
+                                   "Wrong function called"
+                                   (str "Too many calls to " real-fn-name))
+                        :expected (cons ex-real-fn-name ex-args)
+                        :actual (cons real-fn-name args)})))))))
 
 (defn make-mock [[tags real-fn-name & [args & body]]]
   (let [args (or args '[& _])
@@ -57,10 +71,17 @@
                                   :actual (cons (quote ~real-fn-name)
                                                 ~'myargs)}))))))
 
+(defn make-matcher [[_tags _real-fn-name & [args]]]
+  (let [args (or args '[& _])]
+    `(fn [& ~'myargs]
+       (match (apply vector ~'myargs)
+              ~args true
+              :else false))))
+
 (defmacro -expect-call
   "expected-fns: (fn arg-match body...)
                  or [(fn arg-match body...), (fn arg-match body...)...]
-   Each fn may be preceded by keywords :more, :never or :do."
+   Each fn may be preceded by keywords :more, :never, :any-order or :do."
   [expected-fns & body]
 
   (let [expected-fns (if (vector? expected-fns) expected-fns [expected-fns])
@@ -89,11 +110,19 @@
            calls# (atom
                    (list
                     ~@(for [[tags real-fn args :as expected-fn] expected-fns
-                            :when (not (or (:more tags) (:never tags)))]
+                            :when (not (or (:more tags) (:never tags) (:any-order tags)))]
                         [real-fn (make-mock expected-fn)
                          `(quote ~real-fn) `(quote ~args)])))
 
-           ~state [more-fns# calls#]]
+           ;; Format: ([function closure fn-name arg-form matcher], ...)
+           any-order# (atom
+                       (list
+                        ~@(for [[tags real-fn args :as expected-fn] expected-fns
+                                :when (:any-order tags)]
+                            [real-fn (make-mock expected-fn)
+                             `(quote ~real-fn) `(quote ~args) (make-matcher expected-fn)])))
+
+           ~state [more-fns# calls# any-order#]]
 
        (let [result#
              (with-redefs
@@ -108,7 +137,7 @@
                                     (-expected-call ~state f# (quote ~f) a#)))]))))
                ~@body)]
          ;; If we haven't used up all our calls, we error out
-         (when-let [[_# _# ex-fn-name# ex-args#] (first @calls#)]
+         (when-let [[_# _# ex-fn-name# ex-args#] (or (first @calls#) (first @any-order#))]
            (my-report {:type :fail
                        :message (str "Function " ex-fn-name# " was not called")
                        :expected (cons ex-fn-name# ex-args#)

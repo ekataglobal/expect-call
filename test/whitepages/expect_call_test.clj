@@ -200,6 +200,72 @@
        (dummy [dummy-expected-x])
        (dummy (inc dummy-expected-x))))))
 
+(defmacro with-any-order-identity-calls
+  "Expects `(destructuring i)` returning `i` for each i below n, in any order."
+  [n & body]
+  `(sut/with-expect-call ~(vec (for [i (range n)] `(:any-order destructuring [~i] ~i)))
+     ~@body))
+
+(deftest any-order
+  (testing "calls may happen in any order"
+    (sut/with-expect-call [(:any-order log [:a])
+                           (:any-order log [:b])
+                           (:any-order check-error [:c _])]
+      (check-error :c 1)
+      (log :b)
+      (log :a)))
+
+  (testing "arguments pick the expectation, and its body"
+    (sut/with-expect-call [(:any-order log [:a] :from-a)
+                           (:any-order log [:b] :from-b)]
+      (is (= :from-b (log :b)))
+      (is (= :from-a (log :a)))))
+
+  (testing "each expectation is matched at most once"
+    (expecting-failure
+     (sut/with-expect-call [(:any-order log [:a])]
+       (log :a)
+       (log :a))))
+
+  (testing "each expectation has to be matched"
+    (expecting-failure
+     (sut/with-expect-call [(:any-order log [:a])
+                            (:any-order log [:b])]
+       (log :a))))
+
+  (testing "arguments have to match"
+    (expecting-failure
+     (sut/with-expect-call [(:any-order log [:a])]
+       (log :b))))
+
+  (testing "can be mixed with ordered expectations"
+    (sut/with-expect-call [(:never destructuring)
+                           (check-error [:first _])
+                           (:any-order log [:x])
+                           (:any-order log [:z])
+                           (check-error [:second _])
+                           (:more check-error [:third _])]
+      (log :x)
+      (check-error :first 1)
+      (check-error :second 2)
+      (check-error :third 3)
+      (log :z)
+      (check-error :third 3)))
+
+
+  (testing "can be combined with :do"
+    (sut/with-expect-call [(:do :any-order log [:a])]
+      (is (= :logged (log :a)))))
+
+  (testing "concurrent calls"
+    (with-any-order-identity-calls 50
+      (let [results (->> (range 50)
+                         shuffle
+                         (mapv (fn [i] (future [i (destructuring i)])))
+                         (mapv deref))]
+        (is (every? (fn [[i result]] (= i result)) results)))))
+  :ok)
+
 (defmacro check-line [expr]
   `(let [report# (expecting-failure ~expr)
          ~'file-and-line (str (:file report#) ":" (:line report#))]
