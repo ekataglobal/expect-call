@@ -15,6 +15,10 @@
 
 (defn destructuring [_x])
 
+(defn dummy [_x])
+
+(def dummy-expected-x 5)
+
 (defmacro expecting-failure
   "Execute body, expecting it to report a test failure.
 
@@ -182,7 +186,19 @@
     (expecting-failure
      (sut/with-expect-call
       (destructuring [{:foo :bar}])
-      (destructuring (zipmap [:foo] [:qux]))))))
+      (destructuring (zipmap [:foo] [:qux])))))
+
+  (testing "matching against global defs doesn't work - https://github.com/clojure/core.match/wiki/Overview#local-scope-and-symbols"
+    (testing "passing in expected value passes"
+      #_{:clj-kondo/ignore [:unused-binding]}
+      (sut/with-expect-call
+       (dummy [dummy-expected-x])
+       (dummy dummy-expected-x)))
+    (testing "passing in unexpected value also passes"
+      #_{:clj-kondo/ignore [:unused-binding]}
+      (sut/with-expect-call
+       (dummy [dummy-expected-x])
+       (dummy (inc dummy-expected-x))))))
 
 (defmacro check-line [expr]
   `(let [report# (expecting-failure ~expr)
