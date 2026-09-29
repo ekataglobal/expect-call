@@ -1,2 +1,3 @@
-{:linters {:refer-all {:exclude [clojure.test]}}
+{:linters {:refer-all {:exclude [clojure.test]}
+           :redundant-ignore {:level :error}}
  :config-paths ["../resources/clj-kondo.exports/whitepages/expect-call"]}
