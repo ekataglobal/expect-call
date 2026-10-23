@@ -15,4 +15,5 @@
   :expect-call/no-fn-name {:level :error}
   :expect-call/fn-name {:level :error}
   :expect-call/never-with-args {:level :error}
-  :expect-call/args {:level :error}}}
+  :expect-call/args {:level :error}
+  :expect-call/var-wildcard {:level :warning}}}

@@ -18,7 +18,9 @@
    :expect-call/no-fn-name "Must be followed by a symbol representing a fn name"
    :expect-call/fn-name "Must be a symbol representing a fn name"
    :expect-call/never-with-args "No args or body should be used with :never"
-   :expect-call/args "Must be a core.match pattern - see https://github.com/clojure/core.match/wiki/Overview"})
+   :expect-call/args "Must be a core.match pattern - see https://github.com/clojure/core.match/wiki/Overview"
+   :expect-call/var-wildcard
+   "Pattern symbol %s is not a local: core.match binds it as a wildcard instead of comparing with var %s. Use a local, (_ :guard #(= %% %s)), or _ if any value is fine."})
 
 (defn reg-finding!
   "Registers a finding on node with finding-type. Returns nil"
@@ -124,82 +126,95 @@
     (:children expected-fns-node)
     [expected-fns-node]))
 
-(letfn
- [(analyze-rf
-    ([] {:args-node [] :symbol-nodes [] :value-nodes []})
-    ([acc] (update acc :args-node api/vector-node))
-    ([acc arg-node]
-     (cond
-       (and (symbol-node? arg-node) (simple-symbol? (api/sexpr arg-node)))
-       (merge-with
-        conj acc
-        {:args-node arg-node
-         :symbol-nodes arg-node})
+(defn- var-wildcard-node
+  "If arg-node is a simple symbol that resolves to a var (api/resolve returns nil
+  for locals and _ or &),
+  core.match will treat it as a wildcard binding. Registers a dedicated finding
+  and returns the node with :clj-kondo/ignore metadata so clj-kondo does not also
+  report the binding as :shadowed-var / :unused-binding. Returns nil otherwise."
+  [arg-node]
+  (let [sym (api/sexpr arg-node)]
+    (when-let [{var-ns :ns var-name :name} (api/resolve {:name sym})]
+      (api/reg-finding!
+       (merge (meta arg-node)
+              {:type :expect-call/var-wildcard
+               :message (format (get findings :expect-call/var-wildcard)
+                                sym (symbol (str var-ns) (str var-name)) sym)}))
+      (vary-meta arg-node assoc :clj-kondo/ignore [:shadowed-var :unused-binding]))))
 
-       (api/vector-node? arg-node)
-       (merge-with
-        into acc
-        (update (analyze-argvec- arg-node) :args-node vector))
+(def ^:private list-pattern-ops
+  "core.match (pattern op operand) operators whose operand is an expression, not a pattern"
+  #{:guard :when :<<})
 
-       (or (api/string-node? arg-node)
-           (api/keyword-node? arg-node))
-       (update acc :args-node conj (api/token-node (gensym "_arg")))
+(def ^:private flattened-pattern-ops
+  "Operators core.match regroups from flattened vector syntax: [p :guard pred] -> [(p :guard pred)].
+  :<< is not regrouped, so [p :<< f] is three separate patterns."
+  #{:guard :when})
 
-       :else
-       (merge-with
-        conj acc
-        {:args-node (api/token-node (gensym "_arg"))
-         :value-nodes arg-node}))))
-  (analyze-argvec- [args-node]
-    (cond
-      (nil? args-node)
-      {:args-node
-       (api/vector-node [(api/token-node '&) (api/token-node (gensym "_more"))])}
+(defn- pattern-op? [ops node]
+  (and (api/keyword-node? node) (contains? ops (:k node))))
 
-      (empty? (:children args-node))
-      {:args-node args-node}
+(defn- prepare-pattern
+  "Walks a core.match pattern node in the positions clj-kondo's core.match
+  analyzer treats as patterns. Flags non-local symbols that resolve to vars
+  (see var-wildcard-node). Map keys are expressions, not patterns."
+  [node]
+  (cond
+    (and (symbol-node? node) (simple-symbol? (:value node)))
+    (or (var-wildcard-node node) node)
 
-      :else
-      (analyze-rf (reduce analyze-rf (analyze-rf) (:children args-node)))))]
-  (defn analyze-argvec
-    "Returns an argvec that is safe to use as a binding vector,
-    symbols found during analysis, and literal values found during analysis"
-    [args-node]
-    (analyze-argvec- args-node)))
+    ;; (pattern :guard pred), (pattern :when pred), (pattern :<< f): only the first child is a pattern
+    (api/list-node? node)
+    (let [[pattern op & more :as children] (:children node)]
+      (assoc node :children
+             (if (pattern-op? list-pattern-ops op)
+               (list* (prepare-pattern pattern) op more)
+               ;; eager: api/resolve only works during the hook call
+               (doall (map #(prepare-pattern %) children)))))
 
-(let [drop-while-keyword-xf
-      (drop-while api/keyword-node?)
+    ;; flattened [pattern :guard pred ...] syntax
+    (api/vector-node? node)
+    (assoc node :children
+           (loop [[child & more] (:children node) acc []]
+             (cond
+               (nil? child) acc
+               (and (pattern-op? flattened-pattern-ops (first more)) (next more))
+               (recur (nnext more) (conj acc (prepare-pattern child) (first more) (second more)))
+               :else (recur more (conj acc (prepare-pattern child))))))
 
-      ->resolved-local-symbols-xf
-      (comp (map api/sexpr)
-            (filter #(contains? (api/env) %)))
+    (api/map-node? node)
+    (assoc node :children
+           (into []
+                 (comp (partition-all 2)
+                       (mapcat (fn [[k v]]
+                                 (cond-> [k]
+                                   v (conj (prepare-pattern v))))))
+                 (:children node)))
 
-      ->fake-use-node
-      (fn [nodes]
-        (api/list-node (list* (api/token-node `prn) nodes)))]
+    :else node))
+
+(let [drop-while-keyword-xf (drop-while api/keyword-node?)]
   (defn redefed-fn
-    "Transforms expected fn spec into a pair usable with with-redefs.
-    As it might replace nodes in the argvec, it tries to add fake statements (prn)
-    that result in registering usage and further analysis for the replaced nodes"
+    "Transforms expected fn spec into a pair usable with with-redefs:
+    fn-name (fn [& args] (clojure.core.match/match (vec args) pattern (do body...) :else nil))
+    so that clj-kondo's built-in core.match analysis handles the pattern."
     [{:keys [children]}]
     (let [[fn-name-node args-node & body] (into [] drop-while-keyword-xf children)
-          {:keys [args-node symbol-nodes value-nodes]} (analyze-argvec args-node)
-          resolved-local-symbols (into [] ->resolved-local-symbols-xf symbol-nodes)
-          register-use-inside (mapv api/token-node resolved-local-symbols)
-          register-use-outside (into register-use-inside value-nodes)]
+          args-sym (api/token-node (gensym "args"))
+          pattern (if args-node
+                    (prepare-pattern args-node)
+                    (api/vector-node [(api/token-node '&) (api/token-node '_)]))]
       [fn-name-node
-       (-> [(api/token-node 'fn) args-node] ;; (fn [...]
-           (cond->
-            ;; register usage of symbols that are both in the argvec and are valid just outside
-            (seq register-use-inside)
-            (conj (->fake-use-node register-use-inside))) ;; (prn a b c)
-           (conj body) ;; original fn body
-           (as-> $ (api/list-node (apply list* $))) ;; make it a list node
-           (cond->
-            ;; register usage of symbols that are both in the argvec and are valid just outside, or got replaced
-            (seq register-use-outside)
-            ;; wrap with (do (prn a b c) (fn...))
-            (as-> $ (api/list-node [(api/token-node 'do) (->fake-use-node register-use-outside) $]))))])))
+       (api/list-node
+        [(api/token-node 'fn)
+         (api/vector-node [(api/token-node '&) args-sym])
+         (api/list-node
+          [(api/token-node 'clojure.core.match/match)
+           (api/list-node [(api/token-node 'vec) args-sym])
+           pattern
+           (api/list-node (list* (api/token-node 'do) body))
+           (api/keyword-node :else)
+           (api/token-node nil)])])])))
 
 (let [mapcat-redefed-fn-xf (mapcat redefed-fn)]
   (defn ->with-redefs [expect-call-node]
