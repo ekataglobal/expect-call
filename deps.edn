@@ -5,13 +5,13 @@
   :hooks {:deps
           {clj-kondo/clj-kondo
            {:git/url "https://github.com/clj-kondo/clj-kondo.git"
-            :git/tag "v2025.09.22"
-            :git/sha "507c407"}}
+            :git/tag "v2026.10.26"
+            :git/sha "2473c53"}}
           :paths ["resources/clj-kondo.exports/whitepages/expect-call"]
           :ns-aliases {hooks hooks.whitepages.expect-call}}
   :lint {:deps
          {clj-kondo/clj-kondo
           {:git/url "https://github.com/clj-kondo/clj-kondo.git"
-           :git/tag "v2025.09.22"
-           :git/sha "507c407"}}
+           :git/tag "v2026.10.26"
+           :git/sha "2473c53"}}
          :main-opts ["-m" "clj-kondo.main" "--parallel" "--lint"]}}}
