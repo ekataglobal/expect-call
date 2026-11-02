@@ -1,4 +1,4 @@
-{:min-clj-kondo-version "2025.02.20"
+{:min-clj-kondo-version "2026.10.26"
  :hooks
  {:analyze-call
   {whitepages.expect-call/with-expect-call hooks.whitepages.expect-call/expect-call
@@ -15,4 +15,5 @@
   :expect-call/no-fn-name {:level :error}
   :expect-call/fn-name {:level :error}
   :expect-call/never-with-args {:level :error}
-  :expect-call/args {:level :error}}}
+  :expect-call/args {:level :error}
+  :expect-call/var-wildcard {:level :warning}}}

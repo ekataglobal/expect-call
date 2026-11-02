@@ -10,7 +10,13 @@ Requires Clojure 1.9 at least.
 
 ### Running tests
 
-Run tests with `lein test`.
+Run tests with `lein test`. This includes the clj-kondo hook tests in `test-hooks`.
+
+The hook tests run clj-kondo, which depends on Clojure 1.11, so they are kept off the classpath of the Clojure version profiles below. In Leiningen they come from the `:dev` profile, which `with-profile` replaces. With the Clojure CLI they need the `:test-hooks` alias:
+
+```shell
+clojure -M:test-hooks -e "(require 'clojure.test 'whitepages.expect-call-hooks-test) (clojure.test/run-tests 'whitepages.expect-call-hooks-test)"
+```
 
 To check compatibility with different versions of Clojure, use the [Leiningen profiles](https://github.com/technomancy/leiningen/blob/master/doc/PROFILES.md#merging:~:text=Another%20use%20of%20profiles%20is%20to%20test%20against%20various%20sets%20of%20dependencies) defined:
 
@@ -40,9 +46,9 @@ Update both `deps.edn` and `project.clj`.
 ```shell
 #!/usr/bin/env fish
 
-clj-kondo --lint (clojure -Srepro -Spath) --dependencies --copy-configs
+clj-kondo --lint (clojure -Srepro -Spath -A:test-hooks) --dependencies --copy-configs
 
-clj-kondo --lint src:test:deps.edn:.clj-kondo/config.edn:resources
+clj-kondo --lint src:test:test-hooks:deps.edn:.clj-kondo/config.edn:resources
 ```
 
 #### Working on the clj-kondo hook
@@ -52,7 +58,7 @@ Use the `:hooks` alias in your editor/to start your repl. Optional: bump clj-kon
 Can use the `lint` alias to use a specific clj-kondo version:
 
 ```shell
-clojure -M:lint src:test:deps.edn:.clj-kondo/config.edn:resources
+clojure -M:lint src:test:test-hooks:deps.edn:.clj-kondo/config.edn:resources
 ```
 
 ## Introduction
@@ -148,6 +154,8 @@ The parameters we specify for our expected function calls is a `clojure.core.mat
 ```
 
 Of course, we could have expressed that expectation much more concisely using pattern-matching: `(expect-call (log [:error "abc"]))`.
+
+A symbol in a pattern is only compared by value if it is a local in scope. Any other symbol, including one naming a var (e.g. a `def` in the test namespace), is a [wildcard binding](https://github.com/clojure/core.match/wiki/Overview#local-scope-and-symbols) that matches anything. Bind the expected value to a local, or use `(_ :guard #(= % my-var))`. The clj-kondo hook reports such symbols as `:expect-call/var-wildcard`.
 
 
 ### Multiple Calls

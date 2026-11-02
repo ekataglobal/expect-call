@@ -190,12 +190,12 @@
 
   (testing "matching against global defs doesn't work - https://github.com/clojure/core.match/wiki/Overview#local-scope-and-symbols"
     (testing "passing in expected value passes"
-      #_{:clj-kondo/ignore [:unused-binding]}
+      #_{:clj-kondo/ignore [:expect-call/var-wildcard]}
       (sut/with-expect-call
        (dummy [dummy-expected-x])
        (dummy dummy-expected-x)))
     (testing "passing in unexpected value also passes"
-      #_{:clj-kondo/ignore [:unused-binding]}
+      #_{:clj-kondo/ignore [:expect-call/var-wildcard]}
       (sut/with-expect-call
        (dummy [dummy-expected-x])
        (dummy (inc dummy-expected-x))))))
